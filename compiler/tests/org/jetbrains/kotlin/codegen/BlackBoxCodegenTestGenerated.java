@@ -1379,6 +1379,12 @@ public class BlackBoxCodegenTestGenerated extends AbstractBlackBoxCodegenTest {
             doTest(fileName);
         }
 
+        @TestMetadata("immutableRemove.kt")
+        public void testImmutableRemove() throws Exception {
+            String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/box/builtinStubMethods/immutableRemove.kt");
+            doTest(fileName);
+        }
+
         @TestMetadata("implementationInTrait.kt")
         public void testImplementationInTrait() throws Exception {
             String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/box/builtinStubMethods/implementationInTrait.kt");
@@ -14950,6 +14956,12 @@ public class BlackBoxCodegenTestGenerated extends AbstractBlackBoxCodegenTest {
             @TestMetadata("javaAnnotationConstructor.kt")
             public void testJavaAnnotationConstructor() throws Exception {
                 String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/box/reflection/parameters/javaAnnotationConstructor.kt");
+                doTest(fileName);
+            }
+
+            @TestMetadata("javaParametersHaveNoNames.kt")
+            public void testJavaParametersHaveNoNames() throws Exception {
+                String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/box/reflection/parameters/javaParametersHaveNoNames.kt");
                 doTest(fileName);
             }
 
