@@ -41,6 +41,10 @@ class KotlinExtraSteppingFilter : ExtraSteppingFilter {
 
 
     private fun shouldFilter(positionManager: KotlinPositionManager, location: Location): Boolean {
+        if (true) {
+            return false
+        }
+
         val defaultStrata = location.declaringType()?.defaultStratum()
         if ("Kotlin" != defaultStrata) {
             return false

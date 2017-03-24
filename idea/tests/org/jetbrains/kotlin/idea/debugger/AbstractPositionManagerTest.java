@@ -204,13 +204,7 @@ public abstract class AbstractPositionManagerTest extends KotlinLightCodeInsight
     }
 
     private static Map<String, ReferenceType> getReferenceMap(OutputFileCollection outputFiles) {
-        Map<String, ReferenceType> referencesByName = Maps.newHashMap();
-        for (OutputFile outputFile : outputFiles.asList()) {
-            String classFileName = outputFile.getRelativePath();
-            String name = classFileName.substring(0, classFileName.lastIndexOf('.'));
-            referencesByName.put(name, new MockReferenceType(name));
-        }
-        return referencesByName;
+        return new SmartMockReferenceTypeContext(outputFiles).getReferenceTypesByName();
     }
 
     private DebugProcessEvents createDebugProcess(final Map<String, ReferenceType> referencesByName) {

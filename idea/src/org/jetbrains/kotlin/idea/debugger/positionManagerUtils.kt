@@ -27,223 +27,157 @@ import org.jetbrains.kotlin.codegen.AsmUtil
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.fileClasses.NoResolveFileClassesProvider
 import org.jetbrains.kotlin.fileClasses.getFileClassInternalName
-import org.jetbrains.kotlin.idea.caches.resolve.analyze
 import org.jetbrains.kotlin.idea.caches.resolve.resolveToDescriptor
 import org.jetbrains.kotlin.idea.debugger.breakpoints.getLambdasAtLineIfAny
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.isObjectLiteral
-import org.jetbrains.kotlin.resolve.inline.InlineUtil
 
-fun DebugProcess.getAllClassesAtLine(position: SourcePosition): List<ReferenceType> {
-    val result = hashSetOf<ReferenceType>()
+fun DebugProcess.getClassesForPosition(position: SourcePosition): List<ReferenceType> {
+    return doGetClassesForPosition(position) { className, lineNumber ->
+        virtualMachineProxy.classesByName(className).map { findTargetClass(it, lineNumber) }
+    }
+}
 
-    result.addAll(getAllClassesAtElement(position.elementAt, position.line))
+fun DebugProcess.getOuterClassesForPosition(position: SourcePosition): List<ReferenceType> {
+    return doGetClassesForPosition(position) { className, _ -> virtualMachineProxy.classesByName(className) }
+}
 
-    getLambdasAtLineIfAny(position).forEach {
-        result.addAll(getAllClassesAtElement(it, position.line))
+fun getOuterClassInternalNamesForPosition(position: SourcePosition): List<String> {
+    return doGetClassesForPosition(position) { className, _ -> listOf(className) }
+}
+
+private inline fun <T: Any> doGetClassesForPosition(
+        position: SourcePosition,
+        transformer: (className: String, lineNumber: Int) -> List<T?>
+): List<T> {
+    val line = position.line
+    val result = getOuterClassNamesForElement(position.elementAt)
+            .flatMap { transformer(it, line) }
+            .filterNotNullTo(mutableSetOf())
+
+    for (lambda in getLambdasAtLineIfAny(position)) {
+        getOuterClassNamesForElement(lambda).flatMap { transformer(it, line) }.filterNotNullTo(result)
     }
 
     return result.toList()
 }
 
-private fun DebugProcess.getAllClassesAtElement(elementAt: PsiElement, lineAt: Int): List<ReferenceType> {
+@PublishedApi
+internal tailrec fun getOuterClassNamesForElement(element: PsiElement?): List<String> {
+    if (element == null) return emptyList()
+    val actualElement = getNonStrictParentOfType(element, CLASS_ELEMENT_TYPES)
 
-    var depthToLocalOrAnonymousClass = 0
+    return when (actualElement) {
+        is KtFile -> {
+            listOf(NoResolveFileClassesProvider.getFileClassInternalName(actualElement))
+        }
+        is KtClassOrObject -> {
+            val enclosingElementForLocal = KtPsiUtil.getEnclosingElementForLocalDeclaration(actualElement)
+            if (enclosingElementForLocal != null) { // A local class
+                getOuterClassNamesForElement(enclosingElementForLocal)
+            }
+            else if (actualElement.isObjectLiteral()) {
+                getOuterClassNamesForElement(actualElement.parent)
+            }
+            else { // Guaranteed to be non-local class or object
+                getNameForNonLocalClass(actualElement)?.let { listOf(it) } ?: emptyList()
+            }
+        }
+        is KtProperty -> {
+            if (actualElement.isTopLevel) {
+                return getOuterClassNamesForElement(actualElement.parent)
+            }
 
-    fun calc(element: KtElement?): String? {
-        when (element) {
-            null -> return null
-            is KtClassOrObject -> {
-                if (element.isLocal) {
-                    depthToLocalOrAnonymousClass++
-                    return calc(element.getElementToCalculateClassName())
-                }
+            val enclosingElementForLocal = KtPsiUtil.getEnclosingElementForLocalDeclaration(actualElement)
+            if (enclosingElementForLocal != null) {
+                return getOuterClassNamesForElement(enclosingElementForLocal)
+            }
 
-                return element.getNameForNonAnonymousClass()
-            }
-            is KtFunctionLiteral -> {
-                if (!isInlinedLambda(element)) {
-                    depthToLocalOrAnonymousClass++
+            val containingClassOrFile = PsiTreeUtil.getParentOfType(actualElement, KtFile::class.java, KtClassOrObject::class.java)
+            if (containingClassOrFile is KtObjectDeclaration && containingClassOrFile.isCompanion()) {
+                val descriptor = actualElement.resolveToDescriptor() as? PropertyDescriptor
+                // Properties from the companion object are placed in the companion object's containing class
+                if (descriptor != null && AsmUtil.isPropertyWithBackingFieldCopyInOuterClass(descriptor)) {
+                    return getOuterClassNamesForElement(containingClassOrFile.parent)
                 }
-                return calc(element.getElementToCalculateClassName())
             }
-            is KtClassInitializer -> {
-                val parent = element.getElementToCalculateClassName()
 
-                if (parent is KtObjectDeclaration && parent.isCompanion()) {
-                    // Companion-object initializer
-                    return calc(parent.getElementToCalculateClassName())
-                }
+            if (containingClassOrFile != null)
+                getOuterClassNamesForElement(containingClassOrFile)
+            else
+                getOuterClassNamesForElement(actualElement.parent)
+        }
+        else -> error("Unexpected element type ${element::class.java.name}")
+    }
+}
 
-                return calc(parent)
-            }
-            is KtPropertyAccessor -> {
-                return calc(element.getClassOfFile())
-            }
-            is KtProperty -> {
-                if (element.isTopLevel || element.isLocal) {
-                    return calc(element.getElementToCalculateClassName())
-                }
-
-                val containingClass = element.getClassOfFile()
-                if (containingClass is KtObjectDeclaration && containingClass.isCompanion()) {
-                    // Properties from companion object are moved into class
-                    val descriptor = element.resolveToDescriptor() as PropertyDescriptor
-                    if (AsmUtil.isPropertyWithBackingFieldCopyInOuterClass(descriptor)) {
-                        return calc(containingClass.getElementToCalculateClassName())
-                    }
-                }
-
-                return calc(containingClass)
-            }
-            is KtSecondaryConstructor -> {
-                return calc(element.getElementToCalculateClassName())
-            }
-            is KtNamedFunction -> {
-                if (element.name == null) {
-                    val descriptor = element.readAction { InlineUtil.getInlineArgumentDescriptor(it, element.analyze()) }
-                    if (descriptor == null || descriptor.isCrossinline) {
-                        depthToLocalOrAnonymousClass++
-                    }
-                }
-                else if (element.isLocal) {
-                    depthToLocalOrAnonymousClass++
-                }
-                val parent = element.getElementToCalculateClassName()
-                if (parent is KtClassInitializer) {
-                    // TODO BUG? anonymous functions from companion object constructor should be inner class of companion object, not class
-                    return calc(parent.getElementToCalculateClassName())
-                }
-
-                return calc(parent)
-            }
-            is KtFile -> {
-                return NoResolveFileClassesProvider.getFileClassInternalName(element)
-            }
-            else -> throw IllegalStateException("Unsupported container ${element.javaClass}")
+private fun <T : PsiElement> getNonStrictParentOfType(element: PsiElement, elementTypes: Array<Class<out T>>): T? {
+    for (elementType in elementTypes) {
+        if (elementType.isInstance(element)) {
+            @Suppress("UNCHECKED_CAST")
+            return element as T
         }
     }
 
-    val elementToCalcClassName = elementAt.getElementToCalculateClassName(true)
-    val className = calc(elementToCalcClassName) ?: return emptyList()
+    // Do not copy the array (*elementTypes) if the element is one we look for
+    return PsiTreeUtil.getNonStrictParentOfType<T>(element, *elementTypes)
+}
 
-    if (depthToLocalOrAnonymousClass == 0) {
-        return virtualMachineProxy.classesByName(className)
+private val CLASS_ELEMENT_TYPES = arrayOf<Class<out PsiElement>>(
+        KtFile::class.java,
+        KtClassOrObject::class.java,
+        KtProperty::class.java)
+
+private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaultImpls: Boolean = true): String? {
+    val simpleName = classOrObject.name ?: return null
+
+    val containingClass = PsiTreeUtil.getParentOfType(classOrObject, KtClassOrObject::class.java, true)
+    val containingClassName = containingClass?.let {
+        getNameForNonLocalClass(
+                containingClass,
+                !(containingClass is KtClass && classOrObject is KtObjectDeclaration && classOrObject.isCompanion())
+        ) ?: return null
     }
 
-    // the name is a parent class for a local or anonymous class
-    val outers = virtualMachineProxy.classesByName(className)
-    return outers.map { findNested(it, 0, depthToLocalOrAnonymousClass, elementAt, lineAt) }.filterNotNull()
+    val packageFqName = classOrObject.containingKtFile.packageFqName
+    val selfName = if (containingClassName != null) "$containingClassName$$simpleName" else simpleName
+    val selfNameWithPackage = if (packageFqName.isRoot) selfName else "$packageFqName.$selfName"
+
+    return if (handleDefaultImpls && classOrObject is KtClass && classOrObject.isInterface())
+        selfNameWithPackage + JvmAbi.DEFAULT_IMPLS_SUFFIX
+    else
+        selfNameWithPackage
 }
 
-private fun KtClassOrObject.getNameForNonAnonymousClass(addTraitImplSuffix: Boolean = true): String? {
-    if (isLocal) return null
-    if (this.isObjectLiteral()) return null
-
-    val name = name ?: return null
-
-    val parentClass = PsiTreeUtil.getParentOfType(this, KtClassOrObject::class.java, true)
-    if (parentClass != null) {
-        val shouldAddTraitImplSuffix = !(parentClass is KtClass && this is KtObjectDeclaration && this.isCompanion())
-        val parentName = parentClass.getNameForNonAnonymousClass(shouldAddTraitImplSuffix)
-        if (parentName == null) {
-            return null
-        }
-        return parentName + "$" + name
-    }
-
-    val className = if (addTraitImplSuffix && this is KtClass && this.isInterface()) name + JvmAbi.DEFAULT_IMPLS_SUFFIX else name
-
-    val packageFqName = this.containingKtFile.packageFqName
-    return if (packageFqName.isRoot) className else packageFqName.asString() + "." + className
-}
-
-private val TYPES_TO_CALCULATE_CLASSNAME: Array<Class<out KtElement>> =
-        arrayOf(KtFile::class.java,
-                KtClass::class.java,
-                KtObjectDeclaration::class.java,
-                KtEnumEntry::class.java,
-                KtFunctionLiteral::class.java,
-                KtNamedFunction::class.java,
-                KtPropertyAccessor::class.java,
-                KtProperty::class.java,
-                KtClassInitializer::class.java,
-                KtSecondaryConstructor::class.java)
-
-private fun PsiElement?.getElementToCalculateClassName(withItSelf: Boolean = false): KtElement? {
-    if (withItSelf && this?.let { it::class.java } as Class<*> in TYPES_TO_CALCULATE_CLASSNAME) return this as KtElement
-
-    return readAction { PsiTreeUtil.getParentOfType(this, *TYPES_TO_CALCULATE_CLASSNAME) }
-}
-
-private fun PsiElement.getClassOfFile(): KtElement? {
-    return PsiTreeUtil.getParentOfType(this, KtFile::class.java, KtClassOrObject::class.java)
-}
-
-private fun DebugProcess.findNested(
-        fromClass: ReferenceType,
-        currentDepth: Int,
-        requiredDepth: Int,
-        elementAt: PsiElement,
-        lineAt: Int
-): ReferenceType? {
+private fun DebugProcess.findTargetClass(outerClass: ReferenceType, lineAt: Int): ReferenceType? {
     val vmProxy = virtualMachineProxy
-    if (fromClass.isPrepared) {
-        try {
-            if (currentDepth < requiredDepth) {
-                val nestedTypes = vmProxy.nestedTypes(fromClass)
-                for (nested in nestedTypes) {
-                    val found = findNested(nested, currentDepth + 1, requiredDepth, elementAt, lineAt)
-                    if (found != null) {
-                        return found
-                    }
-                }
-                return null
-            }
+    if (!outerClass.isPrepared) return null
 
-            for (location in fromClass.allLineLocations()) {
-                val locationLine = location.lineNumber() - 1
-                if (locationLine <= 0) {
-                    // such locations are not correspond to real lines in code
-                    continue
-                }
-                val method = location.method()
-                if (method == null || DebuggerUtils.isSynthetic(method) || method.isBridge) {
-                    // skip synthetic methods
-                    continue
-                }
-
-                if (lineAt == locationLine) {
-//                    TODO: compare elementAt, can be significant for lambdas
-//                    val candidatePosition = KotlinPositionManager(this).getSourcePosition(location)
-//                    if (candidatePosition?.elementAt == elementAt) {
-                        return fromClass
-//                    }
-                }
-            }
-        }
-        catch (ignored: AbsentInformationException) {
+    try {
+        val nestedTypes = vmProxy.nestedTypes(outerClass)
+        for (nested in nestedTypes) {
+            findTargetClass(nested, lineAt)?.let { return it }
         }
 
+        for (location in outerClass.allLineLocations()) {
+            val locationLine = location.lineNumber() - 1
+            if (locationLine <= 0) {
+                // such locations are not correspond to real lines in code
+                continue
+            }
+
+            val method = location.method()
+            if (method == null || DebuggerUtils.isSynthetic(method) || method.isBridge) {
+                // skip synthetic methods
+                continue
+            }
+
+            if (lineAt == locationLine) {
+                return outerClass
+            }
+        }
     }
+    catch (_: AbsentInformationException) {}
     return null
-}
-
-private fun isInlinedLambda(functionLiteral: KtFunctionLiteral): Boolean {
-    val functionLiteralExpression = functionLiteral.parent
-
-    var parent = functionLiteralExpression.parent
-
-    while (parent is KtParenthesizedExpression || parent is KtBinaryExpressionWithTypeRHS || parent is KtLabeledExpression) {
-        parent = parent.parent
-    }
-
-    while (parent is ValueArgument || parent is KtValueArgumentList) {
-        parent = parent.parent
-    }
-
-    if (parent !is KtElement) return false
-
-    return InlineUtil.isInlinedArgument(functionLiteral, functionLiteral.analyze(), true)
 }
