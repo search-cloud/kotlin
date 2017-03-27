@@ -90,7 +90,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
 
     private fun findLambdas(sourcePosition: SourcePosition): Collection<String> {
         val lambdas = sourcePosition.readAction(::getLambdasAtLineIfAny)
-        return lambdas.flatMap { classNamesForPosition(it, true) }
+        return lambdas.flatMap { classNamesForPosition(it, false) }
     }
 
 
@@ -172,7 +172,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
                 }
 
                 if (!withInlines) return NonCachedClassNames(parentInternalName)
-                val inlinedCalls = findInlinedCalls(element, typeMapper.bindingContext)
+                val inlinedCalls = findInlinedCalls(element, typeMapper.bindingContext) { classNamesForPosition(it, true) }
                 if (parentInternalName == null) return CachedClassNames(inlinedCalls)
 
                 val inlineCallPatterns = inlineCallClassPatterns(typeMapper, element)
@@ -287,7 +287,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
         return typeMapper.mapClass(classDescriptor).internalName
     }
 
-    private fun findInlinedCalls(function: KtNamedFunction, context: BindingContext): List<String> {
+    fun findInlinedCalls(function: KtNamedFunction, context: BindingContext, transformer: (KtElement) -> List<String>): List<String> {
         if (!InlineUtil.isInline(context.get(BindingContext.DECLARATION_TO_DESCRIPTOR, function))) {
             return emptyList()
         }
@@ -329,8 +329,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
                 ).notify(myDebugProcess.project)
             }
 
-            // TODO recursive search
-            return searchResult.flatMap { classNamesForPosition(it, true) }
+            return searchResult.flatMap(transformer)
         }
     }
 

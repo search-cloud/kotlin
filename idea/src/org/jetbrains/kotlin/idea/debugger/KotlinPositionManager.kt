@@ -172,11 +172,7 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
                 continue
             }
 
-            if (true) {
-                return literal
-            }
-
-            val internalClassNames = DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(literal.firstChild, true)
+            val internalClassNames = DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(literal.firstChild, false)
             if (internalClassNames.any { it == currentLocationClassName }) {
                 return literal
             }
@@ -228,7 +224,7 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
         val psiFile = sourcePosition.file
         if (psiFile is KtFile) {
             if (!ProjectRootsUtil.isInProjectOrLibSource(psiFile)) return emptyList()
-            return runReadAction { myDebugProcess.getClassesForPosition(sourcePosition) }
+            return runReadAction { DebugProcessContext(myDebugProcess, scopes).getClassesForPosition(sourcePosition) }
         }
 
         if (psiFile is ClsFileImpl) {
@@ -287,10 +283,17 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
             throw NoDataException.INSTANCE
         }
 
-        val resultNew = runReadAction { getOuterClassInternalNamesForPosition(position) }
-        return resultNew.mapNotNull { internalName ->
-            val name = internalName.replace('/', '.').replace('$', '.')
-            myDebugProcess.requestsManager.createClassPrepareRequest(requestor, name + "*")
+        if (false) {
+            val resultNew = runReadAction { DebugProcessContext(myDebugProcess, scopes).getOuterClassInternalNamesForPosition(position) }
+            return resultNew.mapNotNull { internalName ->
+                val name = internalName.replace('/', '.').replace('$', '.')
+                myDebugProcess.requestsManager.createClassPrepareRequest(requestor, name + "*")
+            }
+        }
+
+        return DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(position, true).mapNotNull {
+            className ->
+            myDebugProcess.requestsManager.createClassPrepareRequest(requestor, className.replace('/', '.'))
         }
     }
 

@@ -20,6 +20,7 @@ import com.intellij.debugger.SourcePosition
 import com.intellij.debugger.engine.DebugProcess
 import com.intellij.debugger.engine.DebuggerUtils
 import com.intellij.psi.PsiElement
+import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
 import com.sun.jdi.AbsentInformationException
 import com.sun.jdi.ReferenceType
@@ -29,25 +30,34 @@ import org.jetbrains.kotlin.fileClasses.NoResolveFileClassesProvider
 import org.jetbrains.kotlin.fileClasses.getFileClassInternalName
 import org.jetbrains.kotlin.idea.caches.resolve.resolveToDescriptor
 import org.jetbrains.kotlin.idea.debugger.breakpoints.getLambdasAtLineIfAny
+import org.jetbrains.kotlin.idea.debugger.evaluate.KotlinDebuggerCaches
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.isObjectLiteral
 
-fun DebugProcess.getClassesForPosition(position: SourcePosition): List<ReferenceType> {
+class DebugProcessContext(
+        delegate: DebugProcess,
+        scopes: List<GlobalSearchScope>,
+        val findInlineUseSites: Boolean = true
+) : DebugProcess by delegate {
+    val nameProvider = DebuggerClassNameProvider(this, scopes)
+}
+
+fun DebugProcessContext.getClassesForPosition(position: SourcePosition): List<ReferenceType> {
     return doGetClassesForPosition(position) { className, lineNumber ->
         virtualMachineProxy.classesByName(className).map { findTargetClass(it, lineNumber) }
     }
 }
 
-fun DebugProcess.getOuterClassesForPosition(position: SourcePosition): List<ReferenceType> {
+fun DebugProcessContext.getOuterClassesForPosition(position: SourcePosition): List<ReferenceType> {
     return doGetClassesForPosition(position) { className, _ -> virtualMachineProxy.classesByName(className) }
 }
 
-fun getOuterClassInternalNamesForPosition(position: SourcePosition): List<String> {
+fun DebugProcessContext.getOuterClassInternalNamesForPosition(position: SourcePosition): List<String> {
     return doGetClassesForPosition(position) { className, _ -> listOf(className) }
 }
 
-private inline fun <T: Any> doGetClassesForPosition(
+private inline fun <T: Any> DebugProcessContext.doGetClassesForPosition(
         position: SourcePosition,
         transformer: (className: String, lineNumber: Int) -> List<T?>
 ): List<T> {
@@ -64,7 +74,7 @@ private inline fun <T: Any> doGetClassesForPosition(
 }
 
 @PublishedApi
-internal tailrec fun getOuterClassNamesForElement(element: PsiElement?): List<String> {
+internal tailrec fun DebugProcessContext.getOuterClassNamesForElement(element: PsiElement?): List<String> {
     if (element == null) return emptyList()
     val actualElement = getNonStrictParentOfType(element, CLASS_ELEMENT_TYPES)
 
@@ -108,6 +118,17 @@ internal tailrec fun getOuterClassNamesForElement(element: PsiElement?): List<St
             else
                 getOuterClassNamesForElement(actualElement.parent)
         }
+        is KtNamedFunction -> {
+            val results = getOuterClassNamesForElement(actualElement.parent)
+            if (!findInlineUseSites) return results
+
+            val inlineCallSiteClasses = nameProvider.findInlinedCalls(
+                    actualElement,
+                    KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement).bindingContext,
+                    transformer = this::getOuterClassNamesForElement)
+
+            results + inlineCallSiteClasses
+        }
         else -> error("Unexpected element type ${element::class.java.name}")
     }
 }
@@ -127,7 +148,8 @@ private fun <T : PsiElement> getNonStrictParentOfType(element: PsiElement, eleme
 private val CLASS_ELEMENT_TYPES = arrayOf<Class<out PsiElement>>(
         KtFile::class.java,
         KtClassOrObject::class.java,
-        KtProperty::class.java)
+        KtProperty::class.java,
+        KtNamedFunction::class.java)
 
 private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaultImpls: Boolean = true): String? {
     val simpleName = classOrObject.name ?: return null
@@ -140,9 +162,9 @@ private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaul
         ) ?: return null
     }
 
-    val packageFqName = classOrObject.containingKtFile.packageFqName
+    val packageFqName = classOrObject.containingKtFile.packageFqName.asString()
     val selfName = if (containingClassName != null) "$containingClassName$$simpleName" else simpleName
-    val selfNameWithPackage = if (packageFqName.isRoot) selfName else "$packageFqName.$selfName"
+    val selfNameWithPackage = if (packageFqName.isEmpty()) selfName else "$packageFqName/$selfName"
 
     return if (handleDefaultImpls && classOrObject is KtClass && classOrObject.isInterface())
         selfNameWithPackage + JvmAbi.DEFAULT_IMPLS_SUFFIX
