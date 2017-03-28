@@ -108,8 +108,10 @@ internal tailrec fun DebugProcessContext.getOuterClassNamesForElement(element: P
             if (containingClassOrFile is KtObjectDeclaration && containingClassOrFile.isCompanion()) {
                 val descriptor = actualElement.resolveToDescriptor() as? PropertyDescriptor
                 // Properties from the companion object are placed in the companion object's containing class
-                if (descriptor != null && AsmUtil.isPropertyWithBackingFieldCopyInOuterClass(descriptor)) {
-                    return getOuterClassNamesForElement(containingClassOrFile.parent)
+                if (descriptor != null) {
+                    @Suppress("NON_TAIL_RECURSIVE_CALL")
+                    return (getOuterClassNamesForElement(containingClassOrFile.parent) +
+                           getOuterClassNamesForElement(containingClassOrFile)).distinct()
                 }
             }
 
@@ -164,7 +166,7 @@ private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaul
 
     val packageFqName = classOrObject.containingKtFile.packageFqName.asString()
     val selfName = if (containingClassName != null) "$containingClassName$$simpleName" else simpleName
-    val selfNameWithPackage = if (packageFqName.isEmpty()) selfName else "$packageFqName/$selfName"
+    val selfNameWithPackage = if (packageFqName.isEmpty() || containingClassName != null) selfName else "$packageFqName/$selfName"
 
     return if (handleDefaultImpls && classOrObject is KtClass && classOrObject.isInterface())
         selfNameWithPackage + JvmAbi.DEFAULT_IMPLS_SUFFIX

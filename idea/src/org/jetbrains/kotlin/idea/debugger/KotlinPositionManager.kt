@@ -283,10 +283,10 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
             throw NoDataException.INSTANCE
         }
 
-        if (false) {
+        if (true) {
             val resultNew = runReadAction { DebugProcessContext(myDebugProcess, scopes).getOuterClassInternalNamesForPosition(position) }
             return resultNew.mapNotNull { internalName ->
-                val name = internalName.replace('/', '.').replace('$', '.')
+                val name = internalName.replace('/', '.')
                 myDebugProcess.requestsManager.createClassPrepareRequest(requestor, name + "*")
             }
         }
