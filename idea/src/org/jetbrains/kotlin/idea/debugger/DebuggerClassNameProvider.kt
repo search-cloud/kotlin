@@ -61,9 +61,9 @@ import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 
 
 class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: List<GlobalSearchScope>) {
-    fun classNamesForPosition(sourcePosition: SourcePosition, withInlines: Boolean): List<String> {
+    fun classNamesForPosition(sourcePosition: SourcePosition): List<String> {
         val element = sourcePosition.readAction { it.elementAt } ?: return emptyList()
-        val names = classNamesForPosition(element, withInlines)
+        val names = classNamesForPosition(element)
 
         val lambdas = findLambdas(sourcePosition)
         if (lambdas.isEmpty()) {
@@ -73,7 +73,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
         return names + lambdas
     }
 
-    fun classNamesForPosition(element: PsiElement?, withInlines: Boolean): List<String> {
+    fun classNamesForPosition(element: PsiElement?): List<String> {
         if (DumbService.getInstance(myDebugProcess.project).isDumb) {
             return emptyList()
         }
@@ -84,22 +84,20 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
             val isInLibrary = LibraryUtil.findLibraryEntry(file.virtualFile, file.project) != null
             val typeMapper = KotlinDebuggerCaches.getOrCreateTypeMapper(element)
 
-            getInternalClassNameForElement(element, typeMapper, file, isInLibrary, withInlines)
+            getInternalClassNameForElement(element, typeMapper, file, isInLibrary)
         }
     }
 
     private fun findLambdas(sourcePosition: SourcePosition): Collection<String> {
         val lambdas = sourcePosition.readAction(::getLambdasAtLineIfAny)
-        return lambdas.flatMap { classNamesForPosition(it, false) }
+        return lambdas.flatMap { classNamesForPosition(it) }
     }
-
 
     private fun getInternalClassNameForElement(
             element: KtElement,
             typeMapper: KotlinTypeMapper,
             file: KtFile,
-            isInLibrary: Boolean,
-            withInlines: Boolean
+            isInLibrary: Boolean
     ): KotlinDebuggerCaches.ComputedClassNames {
         val elementOfClassName = element.readAction { getElementToCalculateClassName(it.parent) }
         when (element) {
@@ -111,7 +109,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
             is KtFunction -> {
                 val descriptor = element.readAction { InlineUtil.getInlineArgumentDescriptor(it, typeMapper.bindingContext) }
                 if (descriptor != null) {
-                    val classNamesForParent = classNamesForPosition(elementOfClassName, withInlines)
+                    val classNamesForParent = classNamesForPosition(elementOfClassName)
                     if (descriptor.isCrossinline) {
                         return CachedClassNames(classNamesForParent + findCrossInlineArguments(element, descriptor, typeMapper.bindingContext))
                     }
@@ -138,9 +136,9 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
             element is KtAnonymousInitializer -> {
                 // Class-object initializer
                 if (elementOfClassName is KtObjectDeclaration && elementOfClassName.isCompanion()) {
-                    return CachedClassNames(classNamesForPosition(elementOfClassName.parent, withInlines))
+                    return CachedClassNames(classNamesForPosition(elementOfClassName.parent))
                 }
-                return CachedClassNames(classNamesForPosition(elementOfClassName, withInlines))
+                return CachedClassNames(classNamesForPosition(elementOfClassName))
             }
             element is KtPropertyAccessor && (!element.readAction { it.property.isTopLevel } || !isInLibrary) -> {
                 val classOrObject = element.readAction { PsiTreeUtil.getParentOfType(it, KtClassOrObject::class.java) }
@@ -150,7 +148,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
             }
             element is KtProperty && (!element.readAction { it.isTopLevel } || !isInLibrary) -> {
                 val descriptor = typeMapper.bindingContext.get(BindingContext.DECLARATION_TO_DESCRIPTOR, element) as? PropertyDescriptor ?:
-                                 return CachedClassNames(classNamesForPosition(elementOfClassName, withInlines))
+                                 return CachedClassNames(classNamesForPosition(elementOfClassName))
 
                 return CachedClassNames(getJvmInternalNameForPropertyOwner(typeMapper, descriptor))
             }
@@ -171,13 +169,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
                     }
                 }
 
-                if (!withInlines) return NonCachedClassNames(parentInternalName)
-                val inlinedCalls = findInlinedCalls(element, typeMapper.bindingContext) { classNamesForPosition(it, true) }
-                if (parentInternalName == null) return CachedClassNames(inlinedCalls)
-
-                val inlineCallPatterns = inlineCallClassPatterns(typeMapper, element)
-
-                return CachedClassNames((listOf(parentInternalName) + inlinedCalls + inlineCallPatterns).filterNotNull())
+                return NonCachedClassNames(parentInternalName)
             }
         }
 
@@ -221,7 +213,7 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
         } ?: return emptyList()
 
         val lexicalScope = runReadAction { inlineCall.getResolutionScope(context) } ?: return emptyList()
-        val baseClassName = classNamesForPosition(inlineCall, false).firstOrNull() ?: return emptyList()
+        val baseClassName = classNamesForPosition(inlineCall).firstOrNull() ?: return emptyList()
 
         val resolvedCall = runReadAction { inlineCall.getResolvedCall(context) } ?: return emptyList()
         val inlineFunctionName = resolvedCall.resultingDescriptor.name
@@ -249,7 +241,10 @@ class DebuggerClassNameProvider(val myDebugProcess: DebugProcess, val scopes: Li
         return listOf("$mangledInternalClassName*")
     }
 
-    private fun getClassNameForClass(klass: KtClassOrObject, typeMapper: KotlinTypeMapper) = klass.readAction { getJvmInternalNameForImpl(typeMapper, it) }
+    private fun getClassNameForClass(klass: KtClassOrObject, typeMapper: KotlinTypeMapper): String? {
+        return klass.readAction { getJvmInternalNameForImpl(typeMapper, it) }
+    }
+
     private fun getClassNameForFile(file: KtFile) = file.readAction { NoResolveFileClassesProvider.getFileClassInternalName(it) }
 
     private val TYPES_TO_CALCULATE_CLASSNAME: Array<Class<out KtElement>> =

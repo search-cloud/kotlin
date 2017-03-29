@@ -172,7 +172,7 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
                 continue
             }
 
-            val internalClassNames = DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(literal.firstChild, false)
+            val internalClassNames = DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(literal.firstChild)
             if (internalClassNames.any { it == currentLocationClassName }) {
                 return literal
             }
@@ -240,7 +240,7 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
     }
 
     fun originalClassNameForPosition(sourcePosition: SourcePosition): String? {
-        return DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(sourcePosition, false).firstOrNull()
+        return DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(sourcePosition).firstOrNull()
     }
 
     override fun locationsOfLine(type: ReferenceType, position: SourcePosition): List<Location> {
@@ -283,17 +283,10 @@ class KotlinPositionManager(private val myDebugProcess: DebugProcess) : MultiReq
             throw NoDataException.INSTANCE
         }
 
-        if (true) {
-            val resultNew = runReadAction { DebugProcessContext(myDebugProcess, scopes).getOuterClassInternalNamesForPosition(position) }
-            return resultNew.mapNotNull { internalName ->
-                val name = internalName.replace('/', '.')
-                myDebugProcess.requestsManager.createClassPrepareRequest(requestor, name + "*")
-            }
-        }
-
-        return DebuggerClassNameProvider(myDebugProcess, scopes).classNamesForPosition(position, true).mapNotNull {
-            className ->
-            myDebugProcess.requestsManager.createClassPrepareRequest(requestor, className.replace('/', '.'))
+        val resultNew = runReadAction { DebugProcessContext(myDebugProcess, scopes).getOuterClassInternalNamesForPosition(position) }
+        return resultNew.mapNotNull { internalName ->
+            val name = internalName.replace('/', '.')
+            myDebugProcess.requestsManager.createClassPrepareRequest(requestor, name + "*")
         }
     }
 
