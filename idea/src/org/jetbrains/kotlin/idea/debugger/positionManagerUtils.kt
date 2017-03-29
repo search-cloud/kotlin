@@ -25,6 +25,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.sun.jdi.AbsentInformationException
 import com.sun.jdi.ReferenceType
 import org.jetbrains.kotlin.codegen.AsmUtil
+import org.jetbrains.kotlin.codegen.binding.CodegenBinding
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.fileClasses.NoResolveFileClassesProvider
 import org.jetbrains.kotlin.fileClasses.getFileClassInternalName
@@ -34,11 +35,13 @@ import org.jetbrains.kotlin.idea.debugger.evaluate.KotlinDebuggerCaches
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.isObjectLiteral
+import org.jetbrains.kotlin.resolve.inline.InlineUtil
 
 class DebugProcessContext(
         delegate: DebugProcess,
         scopes: List<GlobalSearchScope>,
-        val findInlineUseSites: Boolean = true
+        val findInlineUseSites: Boolean = true,
+        val alwaysReturnLambdaParentClass: Boolean = true
 ) : DebugProcess by delegate {
     val nameProvider = DebuggerClassNameProvider(this, scopes)
 }
@@ -131,6 +134,16 @@ internal tailrec fun DebugProcessContext.getOuterClassNamesForElement(element: P
 
             results + inlineCallSiteClasses
         }
+        is KtFunctionLiteral -> {
+            val typeMapper = KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement)
+            val nonInlinedLambdaClassName = CodegenBinding.asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName
+
+            if (!alwaysReturnLambdaParentClass && !InlineUtil.isInlinedArgument(actualElement, typeMapper.bindingContext, true)) {
+                return listOf(nonInlinedLambdaClassName)
+            }
+
+            return getOuterClassNamesForElement(actualElement.parent) + listOf(nonInlinedLambdaClassName)
+        }
         else -> error("Unexpected element type ${element::class.java.name}")
     }
 }
@@ -151,7 +164,8 @@ private val CLASS_ELEMENT_TYPES = arrayOf<Class<out PsiElement>>(
         KtFile::class.java,
         KtClassOrObject::class.java,
         KtProperty::class.java,
-        KtNamedFunction::class.java)
+        KtNamedFunction::class.java,
+        KtFunctionLiteral::class.java)
 
 private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaultImpls: Boolean = true): String? {
     val simpleName = classOrObject.name ?: return null
