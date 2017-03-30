@@ -24,7 +24,6 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
 import com.sun.jdi.AbsentInformationException
 import com.sun.jdi.ReferenceType
-import org.jetbrains.kotlin.codegen.AsmUtil
 import org.jetbrains.kotlin.codegen.binding.CodegenBinding
 import org.jetbrains.kotlin.descriptors.PropertyDescriptor
 import org.jetbrains.kotlin.fileClasses.NoResolveFileClassesProvider
@@ -32,6 +31,7 @@ import org.jetbrains.kotlin.fileClasses.getFileClassInternalName
 import org.jetbrains.kotlin.idea.caches.resolve.resolveToDescriptor
 import org.jetbrains.kotlin.idea.debugger.breakpoints.getLambdasAtLineIfAny
 import org.jetbrains.kotlin.idea.debugger.evaluate.KotlinDebuggerCaches
+import org.jetbrains.kotlin.idea.util.application.runReadAction
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.isObjectLiteral
@@ -52,10 +52,6 @@ fun DebugProcessContext.getClassesForPosition(position: SourcePosition): List<Re
     }
 }
 
-fun DebugProcessContext.getOuterClassesForPosition(position: SourcePosition): List<ReferenceType> {
-    return doGetClassesForPosition(position) { className, _ -> virtualMachineProxy.classesByName(className) }
-}
-
 fun DebugProcessContext.getOuterClassInternalNamesForPosition(position: SourcePosition): List<String> {
     return doGetClassesForPosition(position) { className, _ -> listOf(className) }
 }
@@ -65,11 +61,11 @@ private inline fun <T: Any> DebugProcessContext.doGetClassesForPosition(
         transformer: (className: String, lineNumber: Int) -> List<T?>
 ): List<T> {
     val line = position.line
-    val result = getOuterClassNamesForElement(position.elementAt)
+    val result = getOuterClassNamesForElement(position.readAction { it.elementAt })
             .flatMap { transformer(it, line) }
             .filterNotNullTo(mutableSetOf())
 
-    for (lambda in getLambdasAtLineIfAny(position)) {
+    for (lambda in position.readAction(::getLambdasAtLineIfAny)) {
         getOuterClassNamesForElement(lambda).flatMap { transformer(it, line) }.filterNotNullTo(result)
     }
 
@@ -83,37 +79,40 @@ internal tailrec fun DebugProcessContext.getOuterClassNamesForElement(element: P
 
     return when (actualElement) {
         is KtFile -> {
-            listOf(NoResolveFileClassesProvider.getFileClassInternalName(actualElement))
+            listOf(actualElement.readAction { NoResolveFileClassesProvider.getFileClassInternalName(it) })
         }
         is KtClassOrObject -> {
-            val enclosingElementForLocal = KtPsiUtil.getEnclosingElementForLocalDeclaration(actualElement)
+            val enclosingElementForLocal = actualElement.readAction { KtPsiUtil.getEnclosingElementForLocalDeclaration(it) }
             if (enclosingElementForLocal != null) { // A local class
                 getOuterClassNamesForElement(enclosingElementForLocal)
             }
-            else if (actualElement.isObjectLiteral()) {
-                getOuterClassNamesForElement(actualElement.parent)
+            else if (actualElement.readAction { it.isObjectLiteral() }) {
+                getOuterClassNamesForElement(actualElement.parentInReadAction)
             }
             else { // Guaranteed to be non-local class or object
-                getNameForNonLocalClass(actualElement)?.let { listOf(it) } ?: emptyList()
+                actualElement.readAction { getNameForNonLocalClass(it) }?.let { listOf(it) } ?: emptyList()
             }
         }
         is KtProperty -> {
-            if (actualElement.isTopLevel) {
-                return getOuterClassNamesForElement(actualElement.parent)
+            if (actualElement.readAction { it.isTopLevel }) {
+                return getOuterClassNamesForElement(actualElement.parentInReadAction)
             }
 
-            val enclosingElementForLocal = KtPsiUtil.getEnclosingElementForLocalDeclaration(actualElement)
+            val enclosingElementForLocal = actualElement.readAction { KtPsiUtil.getEnclosingElementForLocalDeclaration(it) }
             if (enclosingElementForLocal != null) {
                 return getOuterClassNamesForElement(enclosingElementForLocal)
             }
 
-            val containingClassOrFile = PsiTreeUtil.getParentOfType(actualElement, KtFile::class.java, KtClassOrObject::class.java)
-            if (containingClassOrFile is KtObjectDeclaration && containingClassOrFile.isCompanion()) {
-                val descriptor = actualElement.resolveToDescriptor() as? PropertyDescriptor
+            val containingClassOrFile = actualElement.readAction {
+                PsiTreeUtil.getParentOfType(it, KtFile::class.java, KtClassOrObject::class.java)
+            }
+
+            if (containingClassOrFile is KtObjectDeclaration && containingClassOrFile.readAction { it.isCompanion() }) {
+                val descriptor = actualElement.readAction { it.resolveToDescriptor() } as? PropertyDescriptor
                 // Properties from the companion object are placed in the companion object's containing class
                 if (descriptor != null) {
                     @Suppress("NON_TAIL_RECURSIVE_CALL")
-                    return (getOuterClassNamesForElement(containingClassOrFile.parent) +
+                    return (getOuterClassNamesForElement(containingClassOrFile.parentInReadAction) +
                            getOuterClassNamesForElement(containingClassOrFile)).distinct()
                 }
             }
@@ -121,32 +120,42 @@ internal tailrec fun DebugProcessContext.getOuterClassNamesForElement(element: P
             if (containingClassOrFile != null)
                 getOuterClassNamesForElement(containingClassOrFile)
             else
-                getOuterClassNamesForElement(actualElement.parent)
+                getOuterClassNamesForElement(actualElement.parentInReadAction)
         }
         is KtNamedFunction -> {
-            val results = getOuterClassNamesForElement(actualElement.parent)
-            if (!findInlineUseSites) return results
+            if (!findInlineUseSites) {
+                return getOuterClassNamesForElement(actualElement.parentInReadAction)
+            }
 
+            @Suppress("NON_TAIL_RECURSIVE_CALL")
+            val nonInlineClasses = getOuterClassNamesForElement(actualElement.parentInReadAction)
             val inlineCallSiteClasses = nameProvider.findInlinedCalls(
                     actualElement,
                     KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement).bindingContext,
                     transformer = this::getOuterClassNamesForElement)
 
-            results + inlineCallSiteClasses
+            nonInlineClasses + inlineCallSiteClasses
         }
         is KtFunctionLiteral -> {
             val typeMapper = KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement)
-            val nonInlinedLambdaClassName = CodegenBinding.asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName
+
+            val nonInlinedLambdaClassName = runReadAction {
+                CodegenBinding.asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName
+            }
 
             if (!alwaysReturnLambdaParentClass && !InlineUtil.isInlinedArgument(actualElement, typeMapper.bindingContext, true)) {
                 return listOf(nonInlinedLambdaClassName)
             }
 
-            return getOuterClassNamesForElement(actualElement.parent) + listOf(nonInlinedLambdaClassName)
+            @Suppress("NON_TAIL_RECURSIVE_CALL")
+            return getOuterClassNamesForElement(actualElement.parentInReadAction) + listOf(nonInlinedLambdaClassName)
         }
         else -> error("Unexpected element type ${element::class.java.name}")
     }
 }
+
+private val PsiElement.parentInReadAction
+    get() = readAction { it.parent }
 
 private fun <T : PsiElement> getNonStrictParentOfType(element: PsiElement, elementTypes: Array<Class<out T>>): T? {
     for (elementType in elementTypes) {
@@ -157,7 +166,7 @@ private fun <T : PsiElement> getNonStrictParentOfType(element: PsiElement, eleme
     }
 
     // Do not copy the array (*elementTypes) if the element is one we look for
-    return PsiTreeUtil.getNonStrictParentOfType<T>(element, *elementTypes)
+    return element.readAction { PsiTreeUtil.getNonStrictParentOfType<T>(it, *elementTypes) }
 }
 
 private val CLASS_ELEMENT_TYPES = arrayOf<Class<out PsiElement>>(
@@ -167,6 +176,7 @@ private val CLASS_ELEMENT_TYPES = arrayOf<Class<out PsiElement>>(
         KtNamedFunction::class.java,
         KtFunctionLiteral::class.java)
 
+// Should be run inside a read action
 private fun getNameForNonLocalClass(classOrObject: KtClassOrObject, handleDefaultImpls: Boolean = true): String? {
     val simpleName = classOrObject.name ?: return null
 

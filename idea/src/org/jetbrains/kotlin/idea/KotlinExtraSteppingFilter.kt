@@ -41,10 +41,6 @@ class KotlinExtraSteppingFilter : ExtraSteppingFilter {
 
 
     private fun shouldFilter(positionManager: KotlinPositionManager, location: Location): Boolean {
-        if (true) {
-            return false
-        }
-
         val defaultStrata = location.declaringType()?.defaultStratum()
         if ("Kotlin" != defaultStrata) {
             return false
@@ -60,11 +56,17 @@ class KotlinExtraSteppingFilter : ExtraSteppingFilter {
 
         val settings = DebuggerSettings.getInstance()
         if (settings.TRACING_FILTERS_ENABLED) {
-            val className = positionManager.originalClassNameForPosition(sourcePosition)?.replace('/', '.') ?: return false
-            for (filter in settings.steppingFilters) {
-                if (filter.isEnabled) {
-                    if (filter.matches(className)) {
-                        return true
+            val classNames = positionManager.originalClassNameForPosition(sourcePosition).map { it.replace('/', '.') }
+            if (classNames.isEmpty()) {
+                return false
+            }
+
+            for (className in classNames) {
+                for (filter in settings.steppingFilters) {
+                    if (filter.isEnabled) {
+                        if (filter.matches(className)) {
+                            return true
+                        }
                     }
                 }
             }
