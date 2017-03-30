@@ -30,8 +30,8 @@ class SmartMockReferenceTypeContext(outputFiles: List<OutputFile>) {
 
     val virtualMachine = MockVirtualMachine()
 
-    val classes = outputFiles.map { file ->
-        ClassNode().also { ClassReader(file.asByteArray()).accept(it, 0) }
+    val classes = outputFiles.filter { it.relativePath.endsWith(".class") }.map { file ->
+        ClassNode().also { ClassReader(file.asByteArray()).accept(it, ClassReader.EXPAND_FRAMES) }
     }
 
     val referenceTypes: List<ReferenceType> by lazy { classes.map { SmartMockReferenceType(it, this) } }
@@ -100,7 +100,7 @@ class SmartMockReferenceType(val classNode: ClassNode, private val context: Smar
 
     override fun isPrepared() = true
 
-    override fun name() = classNode.name.replace('/', '.').replace('$', '.')
+    override fun name() = classNode.name.replace('/', '.')
 
     override fun isInitialized() = true
 
@@ -111,10 +111,13 @@ class SmartMockReferenceType(val classNode: ClassNode, private val context: Smar
     override fun getValues(p0: MutableList<out Field>?) = TODO()
 
     override fun nestedTypes(): List<ReferenceType> {
-        return classNode.innerClasses.mapNotNull { innerClassNode ->
-            if (innerClassNode.outerName != classNode.name) return@mapNotNull null
-            context.classes.find { it.name == innerClassNode.name }
-        }.map { SmartMockReferenceType(it, context) }
+        val fromInnerClasses = classNode.innerClasses
+                .filter { it.outerName == classNode.name }
+                .mapNotNull { context.classes.find { c -> it.name == c.name } }
+
+        val fromOuterClasses = context.classes.filter { it.outerClass == classNode.name }
+
+        return (fromInnerClasses + fromOuterClasses).distinctBy { it.name }.map { SmartMockReferenceType(it, context) }
     }
 
     override fun sourcePaths(stratum: String) = listOf(classNode.sourceFile)
