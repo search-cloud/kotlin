@@ -781,6 +781,12 @@ public class KtPsiUtil {
             if (current instanceof KtValueArgument) {
                 return (KtElement) current;
             }
+            if (current instanceof KtObjectLiteralExpression && parent instanceof KtDelegatedSuperTypeEntry) {
+                PsiElement grandParent = parent.getParent().getParent();
+                if (grandParent instanceof KtClassOrObject) {
+                    return (KtElement) grandParent;
+                }
+            }
 
             current = parent;
         }
