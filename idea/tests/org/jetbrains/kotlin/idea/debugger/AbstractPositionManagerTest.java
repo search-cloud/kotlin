@@ -239,7 +239,7 @@ public abstract class AbstractPositionManagerTest extends KotlinLightCodeInsight
         if (!classes.stream().anyMatch(clazz -> clazz.name().matches(breakpoint.classNameRegexp))) {
             throw new AssertionError("Breakpoint class '" + breakpoint.classNameRegexp +
                                      "' from line " + (breakpoint.lineNumber + 1) + " was not found in the PositionManager classes names: " +
-                                     classes.stream().map(c -> c.name()).collect(Collectors.joining(",")));
+                                     classes.stream().map(ReferenceType::name).collect(Collectors.joining(",")));
         }
 
         // JDI names are of form "package.Class$InnerClass"

@@ -137,11 +137,13 @@ class DebuggerClassNameProvider(
                 val typeMapper = KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement)
                 val descriptor = typeMapper.bindingContext.get(BindingContext.DECLARATION_TO_DESCRIPTOR, element)
 
+                val classNamesOfContainingDeclaration = getOuterClassNamesForElement(actualElement.parentInReadAction)
                 val nonInlineClasses = if (actualElement.readAction { it.isLocal }
                                         || isFunctionWithSuspendStateMachine(descriptor, typeMapper.bindingContext)) {
-                    listOf(asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName.toJdiName())
+                    classNamesOfContainingDeclaration + listOf(
+                            asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName.toJdiName())
                 } else {
-                    getOuterClassNamesForElement(actualElement.parentInReadAction)
+                    classNamesOfContainingDeclaration
                 }
 
                 if (!findInlineUseSites) {
@@ -168,11 +170,7 @@ class DebuggerClassNameProvider(
                 val typeMapper = KotlinDebuggerCaches.getOrCreateTypeMapper(actualElement)
 
                 val nonInlinedLambdaClassName = runReadAction {
-                    asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName
-                }
-
-                if (!alwaysReturnLambdaParentClass && !InlineUtil.isInlinedArgument(actualElement, typeMapper.bindingContext, true)) {
-                    return listOf(nonInlinedLambdaClassName)
+                    asmTypeForAnonymousClass(typeMapper.bindingContext, actualElement).internalName.toJdiName()
                 }
 
                 return getOuterClassNamesForElement(actualElement.parentInReadAction) + listOf(nonInlinedLambdaClassName)
