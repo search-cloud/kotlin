@@ -222,6 +222,17 @@ class K2JVMCompiler : CLICompiler<K2JVMCompilerArguments>() {
     ): KotlinCoreEnvironment? {
 
         val scriptResolverEnv = hashMapOf<String, Any?>()
+        val envParseRe = """(\w+)=(?:"((?:\\.|[^"])*)"|([^\s]*))""".toRegex()
+        if (arguments.scriptResolverEnvironment != null) {
+            for (envParam in arguments.scriptResolverEnvironment) {
+                val match = envParseRe.matchEntire(envParam)
+                if (match == null || match.groupValues.size < 4 || match.groupValues[1].isBlank()) {
+                    messageCollector.report(CompilerMessageSeverity.ERROR, "Unable to parse script-resolver-environment argument $envParam", CompilerMessageLocation.NO_LOCATION)
+                    return null
+                }
+                scriptResolverEnv.put(match.groupValues[1], match.groupValues.drop(2).firstOrNull { it.isNotEmpty() })
+            }
+        }
         configureScriptDefinitions(arguments.scriptTemplates, configuration, messageCollector, scriptResolverEnv)
         if (!messageCollector.hasErrors()) {
             val environment = createCoreEnvironment(rootDisposable, configuration)
