@@ -981,28 +981,15 @@ class ControlFlowInformationProvider private constructor(
         previouslyReported.put(instruction, diagnostic.factory)
 
         var alreadyReported = false
-        var sameErrorForAllCopies = true
         for (copy in instruction.copies) {
             val previouslyReportedErrorFactory = previouslyReported[copy]
             if (previouslyReportedErrorFactory != null) {
                 alreadyReported = true
             }
-
-            if (previouslyReportedErrorFactory !== diagnostic.factory) {
-                sameErrorForAllCopies = false
-            }
         }
 
-        if (mustBeReportedOnAllCopies(diagnostic.factory)) {
-            if (sameErrorForAllCopies) {
-                trace.report(diagnostic)
-            }
-        }
-        else {
-            //only one reporting required
-            if (!alreadyReported) {
-                trace.report(diagnostic)
-            }
+        if (!alreadyReported) {
+            trace.report(diagnostic)
         }
     }
 
@@ -1122,11 +1109,5 @@ class ControlFlowInformationProvider private constructor(
         }
 
         private fun check(a: Any, b: Any, x: Any, y: Any) = a === x && b === y || a === y && b === x
-
-        private fun mustBeReportedOnAllCopies(diagnosticFactory: DiagnosticFactory<*>) =
-                diagnosticFactory === UNUSED_VARIABLE
-                || diagnosticFactory === UNUSED_PARAMETER
-                || diagnosticFactory === UNUSED_ANONYMOUS_PARAMETER
-                || diagnosticFactory === UNUSED_CHANGED_VALUE
     }
 }
