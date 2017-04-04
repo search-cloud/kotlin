@@ -17,7 +17,6 @@
 package org.jetbrains.kotlin.generators.arguments
 
 import org.jetbrains.kotlin.cli.common.arguments.*
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.utils.Printer
 import java.io.File
@@ -30,7 +29,8 @@ import kotlin.reflect.declaredMemberProperties
 @Suppress("unused")
 interface AdditionalGradleProperties {
     @GradleOption(EmptyList::class)
-    @Argument(description = "A list of additional compiler arguments")
+    @ArgumentName("freeCompilerArgs")
+    @ArgumentDescription("A list of additional compiler arguments")
     var freeCompilerArgs: List<String>
 
     object EmptyList : DefaultValues("emptyList()")
@@ -198,7 +198,7 @@ private fun Printer.generatePropertyDeclaration(property: KProperty1<*, *>, modi
 }
 
 private fun Printer.generateDoc(property: KProperty1<*, *>) {
-    val description = property.findAnnotation<Argument>()!!.description
+    val description = property.findAnnotation<ArgumentDescription>()!!.value
     val possibleValues = property.gradleValues.possibleValues
     val defaultValue = property.gradleDefaultValue
 
@@ -223,7 +223,7 @@ private fun generateMarkdown(properties: List<KProperty1<*, *>>) {
     for (property in properties) {
         val name = property.name
         if (name == "includeRuntime") continue   // This option has no effect in Gradle builds
-        val description = property.findAnnotation<Argument>()!!.description
+        val description = property.findAnnotation<ArgumentDescription>()!!.value
         val possibleValues = property.gradleValues.possibleValues
         val defaultValue = when (property.gradleDefaultValue) {
             "null" -> ""

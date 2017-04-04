@@ -18,7 +18,6 @@ package org.jetbrains.kotlin.cli.common.arguments;
 
 import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument;
 
 import java.io.Serializable;
 import java.util.List;
@@ -29,69 +28,88 @@ public abstract class CommonCompilerArguments implements Serializable {
     public static final String PLUGIN_OPTION_FORMAT = "plugin:<pluginId>:<optionName>=<value>";
 
     @GradleOption(DefaultValues.LanguageVersions.class)
-    @Argument(value = "language-version", description = "Provide source compatibility with specified language version")
+    @ArgumentName("language-version")
+    @ArgumentDescription("Provide source compatibility with specified language version")
     @ValueDescription("<version>")
     public String languageVersion;
 
     @GradleOption(DefaultValues.LanguageVersions.class)
-    @Argument(value = "api-version", description = "Allow to use declarations only from the specified version of bundled libraries")
+    @ArgumentName("api-version")
+    @ArgumentDescription("Allow to use declarations only from the specified version of bundled libraries")
     @ValueDescription("<version>")
     public String apiVersion;
 
     @GradleOption(DefaultValues.BooleanFalseDefault.class)
-    @Argument(value = "nowarn", description = "Generate no warnings")
+    @ArgumentName("nowarn")
+    @ArgumentDescription("Generate no warnings")
     public boolean suppressWarnings;
 
     @GradleOption(DefaultValues.BooleanFalseDefault.class)
-    @Argument(value = "verbose", description = "Enable verbose logging output")
+    @ArgumentName("verbose")
+    @ArgumentDescription("Enable verbose logging output")
     public boolean verbose;
 
-    @Argument(value = "version", description = "Display compiler version")
+    @ArgumentName("version")
+    @ArgumentDescription("Display compiler version")
     public boolean version;
 
-    @Argument(value = "help", alias = "h", description = "Print a synopsis of standard options")
+    @ArgumentName({"help", "h"})
+    @ArgumentDescription("Print a synopsis of standard options")
     public boolean help;
 
-    @Argument(value = "X", description = "Print a synopsis of advanced options")
+    @ArgumentName("X")
+    @ArgumentDescription("Print a synopsis of advanced options")
     public boolean extraHelp;
 
-    @Argument(value = "Xno-inline", description = "Disable method inlining")
+    @ArgumentName("Xno-inline")
+    @ArgumentDescription("Disable method inlining")
     public boolean noInline;
 
     // TODO Remove in 1.0
-    @Argument(value = "Xrepeat", description = "Repeat compilation (for performance analysis)")
+    @ArgumentName("Xrepeat")
+    @ArgumentDescription("Repeat compilation (for performance analysis)")
     @ValueDescription("<count>")
     public String repeat;
 
-    @Argument(value = "Xskip-metadata-version-check", description = "Load classes with bad metadata version anyway (incl. pre-release classes)")
+    @ArgumentName("Xskip-metadata-version-check")
+    @ArgumentDescription("Load classes with bad metadata version anyway (incl. pre-release classes)")
     public boolean skipMetadataVersionCheck;
 
-    @Argument(value = "Xallow-kotlin-package", description = "Allow compiling code in package 'kotlin'")
+    @ArgumentName("Xallow-kotlin-package")
+    @ArgumentDescription("Allow compiling code in package 'kotlin'")
     public boolean allowKotlinPackage;
 
-    @Argument(value = "Xplugin", description = "Load plugins from the given classpath")
+    @ArgumentName("Xplugin")
+    @ArgumentDescription("Load plugins from the given classpath")
     @ValueDescription("<path>")
     public String[] pluginClasspaths;
 
-    @Argument(value = "Xmulti-platform", description = "Enable experimental language support for multi-platform projects")
+    @ArgumentName("Xmulti-platform")
+    @ArgumentDescription("Enable experimental language support for multi-platform projects")
     public boolean multiPlatform;
 
-    @Argument(value = "Xno-check-impl", description = "Do not check presence of 'impl' modifier in multi-platform projects")
+    @ArgumentName("Xno-check-impl")
+    @ArgumentDescription("Do not check presence of 'impl' modifier in multi-platform projects")
     public boolean noCheckImpl;
 
-    @Argument(value = "Xskip-java-check", description = "Do not warn when running the compiler under Java 6 or 7")
+    @ArgumentName("Xskip-java-check")
+    @ArgumentDescription("Do not warn when running the compiler under Java 6 or 7")
     public boolean noJavaVersionWarning;
 
-    @Argument(value = "Xcoroutines=warn")
+    @ArgumentName("Xcoroutines=warn")
+    @ArgumentDescription("")
     public boolean coroutinesWarn;
 
-    @Argument(value = "Xcoroutines=error")
+    @ArgumentName("Xcoroutines=error")
+    @ArgumentDescription("")
     public boolean coroutinesError;
 
-    @Argument(value = "Xcoroutines=enable")
+    @ArgumentName("Xcoroutines=enable")
+    @ArgumentDescription("")
     public boolean coroutinesEnable;
 
-    @Argument(value = "P", description = "Pass an option to a plugin")
+    @ArgumentName("P")
+    @ArgumentDescription("Pass an option to a plugin")
     @ValueDescription(PLUGIN_OPTION_FORMAT)
     public String[] pluginOptions;
 

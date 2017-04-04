@@ -26,7 +26,6 @@ import com.intellij.ui.HoverHyperlinkLabel
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.ThreeStateCheckBox
 import org.jetbrains.kotlin.cli.common.arguments.*
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument
 import org.jetbrains.kotlin.config.*
 import org.jetbrains.kotlin.idea.compiler.configuration.*
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
@@ -197,9 +196,9 @@ class KotlinFacetEditorGeneralTab(
             for (field in fieldsToCheck) {
                 val additionalValue = field[additionalArguments]
                 if (additionalValue != field[emptyArguments]) {
-                    val argumentInfo = field.annotations.firstIsInstanceOrNull<Argument>() ?: continue
+                    val argumentInfo = field.annotations.firstIsInstanceOrNull<ArgumentName>() ?: continue
                     val addTo = if (additionalValue != field[primaryArguments]) overridingArguments else redundantArguments
-                    addTo += "<strong>" + argumentInfo.value + "</strong>"
+                    addTo += "<strong>" + argumentInfo.value.first() + "</strong>"
                 }
             }
             if (overridingArguments.isNotEmpty() || redundantArguments.isNotEmpty()) {

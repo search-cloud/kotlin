@@ -16,16 +16,17 @@
 
 package org.jetbrains.kotlin.compilerRunner;
 
-import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Function;
-import com.intellij.util.containers.ComparatorUtil;
+import kotlin.collections.ArraysKt;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.kotlin.cli.common.arguments.ArgumentName;
 import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArguments;
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument;
+import org.jetbrains.kotlin.utils.StringsKt;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 public class ArgumentUtils {
     private ArgumentUtils() {}
@@ -46,7 +47,7 @@ public class ArgumentUtils {
             @NotNull List<String> result
     ) throws IllegalAccessException, InstantiationException {
         for (Field field : clazz.getDeclaredFields()) {
-            Argument argument = field.getAnnotation(Argument.class);
+            ArgumentName argument = field.getAnnotation(ArgumentName.class);
             if (argument == null) continue;
 
             Object value;
@@ -60,23 +61,19 @@ public class ArgumentUtils {
                 continue;
             }
 
-            if (ComparatorUtil.equalsNullable(value, defaultValue)) continue;
+            if (Objects.equals(value, defaultValue)) continue;
 
-            String name = getAlias(argument);
-            if (name == null) {
-                name = getName(argument, field);
-            }
+            String name = ArraysKt.first(argument.value());
 
             Class<?> fieldType = field.getType();
 
             if (fieldType.isArray()) {
                 Object[] values = (Object[]) value;
                 if (values.length == 0) continue;
-                //noinspection unchecked
-                value = StringUtil.join(values, Function.TO_STRING, argument.delimiter());
+                value = StringsKt.join(Arrays.asList(values), ",");
             }
 
-            result.add(argument.prefix() + name);
+            result.add("-" + name);
 
             if (fieldType == boolean.class || fieldType == Boolean.class) continue;
 
@@ -87,15 +84,5 @@ public class ArgumentUtils {
         if (superClazz != null) {
             convertArgumentsToStringList(arguments, defaultArguments, superClazz, result);
         }
-    }
-
-    private static String getAlias(Argument argument) {
-        String alias = argument.alias();
-        return alias.isEmpty() ? null : alias;
-    }
-
-    private static String getName(Argument argument, Field field) {
-        String name = argument.value();
-        return name.isEmpty() ? field.getName() : name;
     }
 }

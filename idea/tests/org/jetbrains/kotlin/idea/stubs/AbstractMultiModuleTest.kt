@@ -27,8 +27,8 @@ import com.intellij.openapi.roots.ModuleRootModificationUtil
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.testFramework.PsiTestUtil
+import org.jetbrains.kotlin.cli.common.arguments.ArgumentName
 import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArguments
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument
 import org.jetbrains.kotlin.config.CompilerSettings
 import org.jetbrains.kotlin.config.KotlinFacetSettingsProvider
 import org.jetbrains.kotlin.config.TargetPlatformKind
@@ -100,7 +100,6 @@ abstract class AbstractMultiModuleTest : DaemonAnalyzerTestCase() {
     }
 
     companion object {
-        private val multiPlatformArg = CommonCompilerArguments::multiPlatform.annotations.filterIsInstance<Argument>().single().value
+        private val multiPlatformArg = CommonCompilerArguments::multiPlatform.annotations.filterIsInstance<ArgumentName>().single().value.first()
     }
-
 }

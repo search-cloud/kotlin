@@ -18,9 +18,10 @@ package org.jetbrains.kotlin.cli.common;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.kotlin.cli.common.arguments.ArgumentName;
+import org.jetbrains.kotlin.cli.common.arguments.ArgumentDescription;
 import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArguments;
 import org.jetbrains.kotlin.cli.common.arguments.ValueDescription;
-import org.jetbrains.kotlin.cli.common.parser.com.sampullara.cli.Argument;
 
 import java.io.PrintStream;
 import java.lang.reflect.Field;
@@ -56,32 +57,33 @@ class Usage {
 
     @Nullable
     private static String fieldUsage(@NotNull Field field, boolean extraHelp) {
-        Argument argument = field.getAnnotation(Argument.class);
+        ArgumentName argument = field.getAnnotation(ArgumentName.class);
         if (argument == null) return null;
 
-        ValueDescription description = field.getAnnotation(ValueDescription.class);
+        String[] argumentNames = argument.value();
+        assert argumentNames.length == 1 || argumentNames.length == 2 : "There should be 1 or 2 argument names, argument: " + field;
 
-        String argumentValue = argument.value();
         // TODO: this is a dirty hack, provide better mechanism for keys that can have several values
-        boolean isXCoroutinesKey = argumentValue.contains("Xcoroutines");
-        String value = isXCoroutinesKey ? "Xcoroutines={enable|warn|error}" : argument.value();
+        boolean isXCoroutinesKey = argumentNames[0].contains("Xcoroutines");
+        String value = isXCoroutinesKey ? "Xcoroutines={enable|warn|error}" : argumentNames[0];
         boolean extraOption = value.startsWith("X") && value.length() > 1;
         if (extraHelp != extraOption) return null;
 
-        String prefix = argument.prefix();
-
         StringBuilder sb = new StringBuilder("  ");
-        sb.append(prefix);
+        sb.append("-");
         sb.append(value);
-        if (!argument.alias().isEmpty()) {
+
+        if (argumentNames.length >= 2) {
             sb.append(" (");
-            sb.append(prefix);
-            sb.append(argument.alias());
+            sb.append("-");
+            sb.append(argumentNames[1]);
             sb.append(")");
         }
-        if (description != null) {
+
+        ValueDescription valueDescription = field.getAnnotation(ValueDescription.class);
+        if (valueDescription != null) {
             sb.append(" ");
-            sb.append(description.value());
+            sb.append(valueDescription.value());
         }
 
         if (isXCoroutinesKey) {
@@ -100,7 +102,11 @@ class Usage {
         }
 
         sb.append(" ");
-        sb.append(argument.description());
+
+        ArgumentDescription argumentDescription = field.getAnnotation(ArgumentDescription.class);
+        assert argumentDescription != null : "No ArgumentDescription for argument " + value;
+        sb.append(argumentDescription.value());
+
         return sb.toString();
     }
 }
