@@ -72,10 +72,7 @@ import org.jetbrains.kotlin.types.expressions.typeInfoFactory.TypeInfoFactoryKt;
 import org.jetbrains.kotlin.types.expressions.unqualifiedSuper.UnqualifiedSuperKt;
 import org.jetbrains.kotlin.util.OperatorNameConventions;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -375,17 +372,23 @@ public class BasicExpressionTypingVisitor extends ExpressionTypingVisitor {
             context.trace.report(CAST_NEVER_SUCCEEDS.on(expression.getOperationReference()));
             return;
         }
-        KotlinTypeChecker typeChecker = KotlinTypeChecker.DEFAULT;
-        if (isExactTypeCast(actualType, targetType)) {
-            // cast to itself: String as String
-            context.trace.report(USELESS_CAST.on(expression));
-            return;
-        }
-        Collection<KotlinType> possibleTypes = components.dataFlowAnalyzer.getAllPossibleTypes(
-                expression.getLeft(), context.dataFlowInfo, actualType, context);
 
+        DataFlowValue dataFlowValue = DataFlowValueFactory.createDataFlowValue(expression.getLeft(), actualType, context);
+        Set<KotlinType> stableTypes = context.dataFlowInfo.getStableTypes(dataFlowValue);
+        if (stableTypes.isEmpty()) {
+            if (isExactTypeCast(actualType, targetType)) {
+                // cast to itself: String as String
+                context.trace.report(USELESS_CAST.on(expression));
+                return;
+            }
+
+            stableTypes.add(actualType);
+        }
+
+        KotlinTypeChecker typeChecker = KotlinTypeChecker.DEFAULT;
         boolean checkExactType = shouldCheckForExactType(expression, context.expectedType, targetType, typeChecker);
-        for (KotlinType possibleType : possibleTypes) {
+
+        for (KotlinType possibleType : stableTypes) {
             boolean castIsUseless = checkExactType
                                     ? isExactTypeCast(possibleType, targetType)
                                     : isUpcast(possibleType, targetType, typeChecker);
@@ -419,7 +422,6 @@ public class BasicExpressionTypingVisitor extends ExpressionTypingVisitor {
     }
 
     private static boolean isUpcast(KotlinType candidateType, KotlinType targetType, KotlinTypeChecker typeChecker) {
-        if (KotlinBuiltIns.isNullableNothing(candidateType)) return false;
         if (!typeChecker.isSubtypeOf(candidateType, targetType)) return false;
 
         if (isFunctionType(candidateType) && isFunctionType(targetType)) {
